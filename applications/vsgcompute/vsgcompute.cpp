@@ -1,21 +1,18 @@
 #include <vsg/all.h>
 
-#include <osg/ImageUtils>
-#include <osgDB/ReadFile>
-#include <osgDB/WriteFile>
-
 #include <iostream>
 #include <chrono>
 
 int main(int argc, char** argv)
 {
     vsg::CommandLine arguments(&argc, argv);
-    uint32_t width = 3200;
-    uint32_t height = 2400;
-    auto debugLayer = arguments.value(false, {"--debug","-d"});
-    auto apiDumpLayer = arguments.value(false, {"--api","-a"});
-    auto workgroupSize = arguments.value<uint32_t>(32, "-w");
-    auto outputFIlename = arguments.value<std::string>("", "-o");
+    auto width = arguments.value(1024, "--width");
+    auto height = arguments.value(1024, "--height");
+    auto debugLayer = arguments.read({"--debug","-d"});
+    auto apiDumpLayer = arguments.read({"--api","-a"});
+    auto workgroupSize = arguments.value(32, "-w");
+    auto outputFilename = arguments.value<std::string>("", "-o");
+    auto outputAsFloat = arguments.read("-f");
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
     vsg::Names instanceExtensions;
@@ -29,28 +26,41 @@ int main(int argc, char** argv)
     }
 
     vsg::Paths searchPaths = vsg::getEnvPaths("VSG_FILE_PATH");
-    vsg::ref_ptr<vsg::Shader> computeShader = vsg::Shader::read(VK_SHADER_STAGE_COMPUTE_BIT, "main", vsg::findFile("shaders/comp.spv", searchPaths));
-    if (!computeShader)
+    vsg::ref_ptr<vsg::ShaderStage> computeStage = vsg::ShaderStage::read(VK_SHADER_STAGE_COMPUTE_BIT, "main", vsg::findFile("shaders/comp.spv", searchPaths));
+    if (!computeStage)
     {
         std::cout<<"Error : No shader loaded."<<std::endl;
         return 1;
     }
 
+    computeStage->setSpecializationConstants({
+        {0, vsg::intValue::create(width)},
+        {1, vsg::intValue::create(height)},
+        {2, vsg::intValue::create(workgroupSize)}
+    });
 
     vsg::Names validatedNames = vsg::validateInstancelayerNames(requestedLayers);
 
+    // get the physical device that suports the required compute queue
     vsg::ref_ptr<vsg::Instance> instance = vsg::Instance::create(instanceExtensions, validatedNames);
-    vsg::ref_ptr<vsg::PhysicalDevice> physicalDevice = vsg::PhysicalDevice::create(instance, VK_QUEUE_COMPUTE_BIT);
-    vsg::ref_ptr<vsg::Device> device = vsg::Device::create(physicalDevice, validatedNames, deviceExtensions);
+    auto [physicalDevice, computeQueueFamily] = instance->getPhysicalDeviceAndQueueFamily(VK_QUEUE_COMPUTE_BIT);
+    if (!physicalDevice || computeQueueFamily<0)
+    {
+        std::cout<<"No vkPhysicalDevice available that supports compute."<<std::endl;
+        return 1;
+    }
+
+    // create the logical device with specified queue, layers and extensions
+    vsg::QueueSettings queueSettings{vsg::QueueSetting{computeQueueFamily, {1.0}}};
+    vsg::ref_ptr<vsg::Device> device = vsg::Device::create(physicalDevice, queueSettings, validatedNames, deviceExtensions);
     if (!device)
     {
-        std::cout<<"Unable to create required Vulkan Deice."<<std::endl;
+        std::cout<<"Unable to create required vkDevice."<<std::endl;
         return 1;
     }
 
     // get the queue for the compute commands
-    VkQueue computeQueue = device->getQueue(physicalDevice->getComputeFamily());
-
+    auto computeQueue = device->getQueue(computeQueueFamily);
 
     // allocate output storage buffer
     VkDeviceSize bufferSize = sizeof(vsg::vec4) * width * height;
@@ -58,71 +68,71 @@ int main(int argc, char** argv)
     vsg::ref_ptr<vsg::DeviceMemory>  bufferMemory = vsg::DeviceMemory::create(device, buffer,  VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
     buffer->bind(bufferMemory, 0);
 
+    // set up DescriptorSetLayout, DecriptorSet and BindDescriptorSets
+    vsg::DescriptorSetLayoutBindings descriptorBindings { {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr} };
+    auto descriptorSetLayout = vsg::DescriptorSetLayout::create(descriptorBindings);
+    vsg::Descriptors descriptors { vsg::DescriptorBuffer::create(vsg::BufferDataList{vsg::BufferData(buffer, 0, bufferSize)}, 0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER) };
 
-    // set up DescriptorPool, DescriptorSetLayout, DecriptorSet and BindDescriptorSets
-    vsg::ref_ptr<vsg::DescriptorPool> descriptorPool = vsg::DescriptorPool::create(device, 1,
-    {
-        {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}
-    });
-
-    vsg::ref_ptr<vsg::DescriptorSetLayout> descriptorSetLayout = vsg::DescriptorSetLayout::create(device,
-    {
-        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, nullptr}
-    });
-
-    vsg::ref_ptr<vsg::DescriptorSet> descriptorSet = vsg::DescriptorSet::create(device, descriptorPool, descriptorSetLayout,
-    {
-        vsg::DescriptorBuffer::create(0, 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, vsg::BufferDataList{vsg::BufferData(buffer, 0, bufferSize)})
-    });
-
-    vsg::ref_ptr<vsg::PipelineLayout> pipelineLayout = vsg::PipelineLayout::create(device, {descriptorSetLayout}, {});
-
-    vsg::ref_ptr<vsg::BindDescriptorSets> bindDescriptorSets = vsg::BindDescriptorSets::create(VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, vsg::DescriptorSets{descriptorSet});
-
+    auto descriptorSet = vsg::DescriptorSet::create(descriptorSetLayout, descriptors);
+    auto pipelineLayout = vsg::PipelineLayout::create(vsg::DescriptorSetLayouts{descriptorSetLayout}, vsg::PushConstantRanges{});
+    auto bindDescriptorSet = vsg::BindDescriptorSet::create(VK_PIPELINE_BIND_POINT_COMPUTE, pipelineLayout, descriptorSet);
 
     // set up the compute pipeline
-    vsg::ref_ptr<vsg::ShaderModule> computeShaderModule = vsg::ShaderModule::create(device, computeShader);
-    vsg::ref_ptr<vsg::ComputePipeline> pipeline = vsg::ComputePipeline::create(device, pipelineLayout, computeShaderModule);
-    vsg::ref_ptr<vsg::BindPipeline> bindPipeline = vsg::BindPipeline::create(pipeline);
+    auto pipeline = vsg::ComputePipeline::create(pipelineLayout, computeStage);
+    auto bindPipeline = vsg::BindComputePipeline::create(pipeline);
 
+    // assign to a CommandGraph that binds the Pipeline and DescritorSets and calls Dispatch
+    auto commandGraph = vsg::StateGroup::create();
+    commandGraph->add(bindPipeline);
+    commandGraph->add(bindDescriptorSet);
+    commandGraph->addChild(vsg::Dispatch::create(uint32_t(ceil(float(width)/float(workgroupSize))), uint32_t(ceil(float(height)/float(workgroupSize))), 1));
 
-    // setup command pool
-    vsg::ref_ptr<vsg::CommandPool> commandPool = vsg::CommandPool::create(device, physicalDevice->getComputeFamily());
+    // compile the Vulkan objects
+    vsg::CompileTraversal compileTraversal(device);
+    compileTraversal.context.commandPool = vsg::CommandPool::create(device, computeQueueFamily);
+    compileTraversal.context.descriptorPool = vsg::DescriptorPool::create(device, 1, {{VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1}});
 
+    commandGraph->accept(compileTraversal);
 
     // setup fence
     vsg::ref_ptr<vsg::Fence> fence = vsg::Fence::create(device);
 
     auto startTime =std::chrono::steady_clock::now();
 
-    // dispatch commands
-    vsg::dispatchCommandsToQueue(device, commandPool, fence, 100000000000, computeQueue, [&](vsg::CommandBuffer& commandBuffer)
+    // submit commands
+    vsg::submitCommandsToQueue(device, compileTraversal.context.commandPool, fence, 100000000000, computeQueue, [&](vsg::CommandBuffer& commandBuffer)
     {
-        bindPipeline->dispatch(commandBuffer);
-        bindDescriptorSets->dispatch(commandBuffer);
-        vkCmdDispatch(commandBuffer, uint32_t(ceil(float(width)/float(workgroupSize))), uint32_t(ceil(float(height)/float(workgroupSize))), 1);
+        vsg::RecordTraversal recordTraversal(&commandBuffer);
+        commandGraph->accept(recordTraversal);
     });
 
     auto time = std::chrono::duration<float, std::chrono::milliseconds::period>(std::chrono::steady_clock::now()-startTime).count();
     std::cout<<"Time to run commands "<<time<<"ms"<<std::endl;
 
-    if (!outputFIlename.empty())
+    if (!outputFilename.empty())
     {
-        vsg::ref_ptr<vsg::vec4Array> array(new vsg::MappedArray<vsg::vec4Array>(bufferMemory, 0, width*height)); // devicememorry, offset and numElements
+        // Map the buffer memory and assign as a vec4Array2D that will automatically unmap itself on destruction.
+        auto image = vsg::MappedData<vsg::vec4Array2D>::create(bufferMemory, 0, 0, width, height); // deviceMemory, offset, flags and dimensions
+        image->setFormat(VK_FORMAT_R32G32B32A32_SFLOAT);
 
-        osg::ref_ptr<osg::Image> image = new osg::Image;
-        image->allocateImage(width, height, 1, GL_RGBA, GL_UNSIGNED_BYTE);
-        unsigned char* dest_ptr = image->data();
-
-        for(auto& c : *array)
+        if (outputAsFloat)
         {
-            (*dest_ptr++) = (unsigned char)(c.r * 255.0f);
-            (*dest_ptr++) = (unsigned char)(c.g * 255.0f);
-            (*dest_ptr++) = (unsigned char)(c.b * 255.0f);
-            (*dest_ptr++) = (unsigned char)(c.a * 255.0f);
+            vsg::write(image, outputFilename);
         }
+        else
+        {
+            // create a unsigned byte version of the image and then copy the texels across converting colours from float to unsigned byte.
+            auto dest = vsg::ubvec4Array2D::create(width, height);
+            dest->setFormat(VK_FORMAT_R8G8B8A8_UNORM);
+            using component_type = uint8_t;
+            auto c_itr = dest->begin();
+            for(auto& colour : *image)
+            {
+                (c_itr++)->set(static_cast<component_type>(colour.r*255.0), static_cast<component_type>(colour.g*255.0), static_cast<component_type>(colour.b*255.0), static_cast<component_type>(colour.a*255.0));
+            }
 
-        osgDB::writeImageFile(*image, outputFIlename);
+            vsg::write(dest, outputFilename);
+        }
     }
 
     // clean up done automatically thanks to ref_ptr<>

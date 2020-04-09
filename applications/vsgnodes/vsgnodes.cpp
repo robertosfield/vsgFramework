@@ -1,11 +1,4 @@
-#include <vsg/core/ref_ptr.h>
-#include <vsg/core/observer_ptr.h>
-#include <vsg/core/Object.h>
-#include <vsg/core/Auxiliary.h>
-
-#include <vsg/nodes/Group.h>
-#include <vsg/nodes/QuadGroup.h>
-#include <vsg/nodes/LOD.h>
+#include <vsg/all.h>
 
 #include <iostream>
 #include <vector>
@@ -53,12 +46,8 @@ int main(int /*argc*/, char** /*argv*/)
 
     // set up LOD
     auto lod = vsg::LOD::create();
-    lod->setMinimumArea(0, 0.0);
-    lod->setChild(0, new vsg::Node);
-    lod->setMinimumArea(1, 0.0);
-    lod->setChild(1, new vsg::Node);
-    group->addChild(lod);
-
+    lod->addChild(vsg::LOD::LODChild{0.0, vsg::Node::create()});
+    lod->addChild(vsg::LOD::LODChild{0.5, vsg::Node::create()});
     PrintVisitor visitor;
     group->accept(visitor);
 

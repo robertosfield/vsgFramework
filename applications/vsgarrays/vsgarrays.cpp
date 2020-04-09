@@ -1,8 +1,4 @@
-#include <vsg/core/Object.h>
-#include <vsg/core/Auxiliary.h>
-#include <vsg/core/Array.h>
-#include <vsg/core/Visitor.h>
-#include <vsg/utils/stream.h>
+#include <vsg/all.h>
 
 #include <iostream>
 #include <algorithm>
@@ -127,8 +123,7 @@ int main(int /*argc*/, char** /*argv*/)
         std::cout<<"   v[] = "<<v<<std::endl;
     });
 
-    vsg::ref_ptr<vsg::vec4Array> colours(new vsg::vec4Array());
-    colours->resize(20);
+    vsg::ref_ptr<vsg::vec4Array> colours(new vsg::vec4Array(20));
     vsg::vec4 colour(0.25, 0.5, 0.75, 1.0);
     for (std::size_t i=0; i<colours->size(); ++i)
     {

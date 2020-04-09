@@ -1,7 +1,4 @@
-#include <vsg/core/ref_ptr.h>
-#include <vsg/core/observer_ptr.h>
-#include <vsg/core/Object.h>
-#include <vsg/core/Auxiliary.h>
+#include <vsg/all.h>
 
 #include <vsg/nodes/Group.h>
 #include <vsg/nodes/QuadGroup.h>
@@ -304,7 +301,7 @@ int main(int argc, char** argv)
     auto numTraversals = arguments.value(10, {"-t", "--traversals"});
     auto type = arguments.value(std::string("vsg::Group"), "--type");
     auto quiet = arguments.value(false, "-q");
-    vsg::ref_ptr<vsg::DispatchTraversal> vsg_dispatchTraversal(arguments.read("-d") ? new vsg::DispatchTraversal : nullptr);
+    vsg::ref_ptr<vsg::RecordTraversal> vsg_dispatchTraversal(arguments.read("-d") ? new vsg::RecordTraversal() : nullptr);
     vsg::ref_ptr<VsgConstVisitor> vsg_ConstVisitor(arguments.read("-c") ? new VsgConstVisitor : nullptr);
     if (arguments.errors()) return arguments.writeErrorMessages(std::cerr);
 
@@ -337,7 +334,7 @@ int main(int argc, char** argv)
     {
         if (vsg_dispatchTraversal)
         {
-            std::cout<<"using DispatchTraversal"<<std::endl;
+            std::cout<<"using RecordTraversal"<<std::endl;
             for(unsigned int i=0; i<numTraversals; ++i)
             {
                 vsg_root->accept(*vsg_dispatchTraversal);
