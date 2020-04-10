@@ -132,7 +132,7 @@ if (NOT OSG_FOUND)
 endif()
 
 find_package(vsg)
-if (NOT VSG_FOUND)
+if (NOT vsg_FOUND)
     set(TARGET_VSG VulkanSceneGraph)
     addExternal(${TARGET_VSG} "https://github.com/vsg-dev/VulkanSceneGraph.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}" "" "")
     set(VSG_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsg header directory" FORCE)
@@ -147,7 +147,7 @@ endif()
 
 
 find_package(osg2vsg)
-if (NOT OSG2VSG_FOUND)
+if (NOT osg2vsg_FOUND)
     set(TARGET_OSG2VSG osg2vsg)
 
     if (VSG_DIR)
@@ -173,7 +173,7 @@ endif()
 
 
 find_package(vsgXchange)
-if (NOT VSGXCHANGE_FOUND)
+if (NOT vsgXchange_FOUND)
     set(TARGET_VSGXCHANGE vsgXchange)
 
     if (VSG_DIR)
