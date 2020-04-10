@@ -9,7 +9,8 @@ include(ExternalProject)
 set(OUTPUT_BINDIR ${PROJECT_BINARY_DIR}/bin)
 set(OUTPUT_LIBDIR ${PROJECT_BINARY_DIR}/lib)
 set(OUTPUT_INCDIR ${PROJECT_BINARY_DIR}/include)
-set(COMPONENT_DIR ${PROJECT_BINARY_DIR}/components)
+set(COMPONENTS_DIR ${PROJECT_BINARY_DIR}/components)
+set(DOWNLOADS_DIR ${PROJECT_BINARY_DIR}/downloads)
 set(PREFIX_PATH   ${CMAKE_PREFIX_PATH} ${PROJECT_BINARY_DIR})
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${OUTPUT_LIBDIR})
@@ -37,7 +38,9 @@ endif(NOT CMAKE_BUILD_TYPE)
 option(VSGFRAMEWORK_SHARED_LIBRARY "Set to ON to build libraries for dynamic linking.  Use OFF for static." ON)
 
 
-macro(addExternal TARGET_NAME REPOSITORY TAG EXTRA_CMAKE_ARGS1 EXTRA_CMAKE_ARGS2 EXTRA_CMAKE_ARGS3)
+
+
+macro(addExternal TARGET_NAME REPOSITORY TAG EXTRA_CMAKE_ARGS1 EXTRA_CMAKE_ARGS2 EXTRA_CMAKE_ARGS3 EXTRA_CMAKE_ARGS4)
 
     ExternalProject_Add(
         ${TARGET_NAME}
@@ -50,12 +53,15 @@ macro(addExternal TARGET_NAME REPOSITORY TAG EXTRA_CMAKE_ARGS1 EXTRA_CMAKE_ARGS2
         UPDATE_COMMAND ""
         PATCH_COMMAND ""
 
-        SOURCE_DIR "${COMPONENT_DIR}/${TARGET_NAME}"
-        CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${PROJECT_BINARY_DIR} -DCMAKE_PREFIX_PATH=${PREFIX_PATH} ${EXTRA_CMAKE_ARGS1} ${EXTRA_CMAKE_ARGS2} ${EXTRA_CMAKE_ARGS3}
+        SOURCE_DIR "${COMPONENTS_DIR}/${TARGET_NAME}"
+        CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DCMAKE_INSTALL_PREFIX=${PROJECT_BINARY_DIR} -DCMAKE_PREFIX_PATH=${PREFIX_PATH} ${EXTRA_CMAKE_ARGS1} ${EXTRA_CMAKE_ARGS2} ${EXTRA_CMAKE_ARGS3} ${EXTRA_CMAKE_ARGS4}
     )
 endmacro()
 
-find_package(Vulkan)
+add_custom_target(clobber
+    COMMAND git clean -d -f -x
+)
+
 find_package(Threads)
 
 find_library(DL_LIBRARY dl)
@@ -63,12 +69,46 @@ if(NOT DL_LIBRARY)
     set(DL_LIBRARY "") # change from NOTFOUND to empty when passed to linker
 endif()
 
-
 if (BUILD_SHARED_LIBS)
     set(DEFAULT_LIB_SUFFIX ${CMAKE_SHARED_LIBRARY_SUFFIX})
 else()
     set(DEFAULT_LIB_SUFFIX ${CMAKE_STATIC_LIBRARY_SUFFIX})
 endif()
+
+if (VULKAN_SDK)
+    set(ENV{VULKAN_SDK} ${VULKAN_SDK})
+endif()
+
+find_package(Vulkan)
+if (NOT VULKAN_FOUND)
+
+    set(VulkanSDKVersion "1.2.131.2" CACHE STRING "Vulkan_SDK version to download")
+
+    if (NOT EXISTS ${DOWNLOADS_DIR}/${VulkanSDKVersion})
+
+        message("Will attempt to download : " ${VulkanSDKVersion})
+
+        file(MAKE_DIRECTORY downloads)
+
+        execute_process(COMMAND wget --no-cookies -O ${DOWNLOADS_DIR}/vulkansdk-linux-x86_64-${VulkanSDKVersion}.tar.gz https://sdk.lunarg.com/sdk/download/${VulkanSDKVersion}/linux/vulkansdk-linux-x86_64-${VulkanSDKVersion}.tar.gz)
+        execute_process(COMMAND tar -zxf ${DOWNLOADS_DIR}/vulkansdk-linux-x86_64-${VulkanSDKVersion}.tar.gz -C ${DOWNLOADS_DIR})
+
+    endif()
+
+    if (EXISTS ${DOWNLOADS_DIR}/${VulkanSDKVersion})
+
+        set(VULKAN_SDK ${DOWNLOADS_DIR}/${VulkanSDKVersion}/x86_64)
+        set(ENV{VULKAN_SDK} ${VULKAN_SDK})
+        set(EXTRA_CMAKE_ARGS_VULKAN_SDK -DVULKAN_SDK=${VULKAN_SDK})
+
+        message("VULKAN_SDK = " $ENV{VULKAN_SDK})
+
+        find_package(Vulkan)
+
+    endif()
+
+endif()
+
 
 find_package(osg)
 find_package(osgDB)
@@ -94,10 +134,7 @@ endif()
 find_package(vsg)
 if (NOT VSG_FOUND)
     set(TARGET_VSG VulkanSceneGraph)
-    addExternal(${TARGET_VSG} "https://github.com/vsg-dev/VulkanSceneGraphPrototype.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "" "")
-    if (TARGET_OSG)
-        ExternalProject_Add_StepDependencies(${TARGET_VSG} configure ${TARGET_OSG})
-    endif()
+    addExternal(${TARGET_VSG} "https://github.com/vsg-dev/VulkanSceneGraph.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}" "" "")
     set(VSG_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsg header directory" FORCE)
     set(VSG_LIBRARY ${OUTPUT_LIBDIR}/libvsg${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "vsg Library" FORCE)
     set(VSG_LIBRARIES ${VSG_LIBRARY})
@@ -120,7 +157,7 @@ if (NOT OSG2VSG_FOUND)
         set(EXTRA_ARGS2 "-DOSG_DIR=${OSG_DIR}")
     endif()
 
-    addExternal(${TARGET_OSG2VSG} "https://github.com/vsg-dev/osg2vsg.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_ARGS1}" "${EXTRA_ARGS2}")
+    addExternal(${TARGET_OSG2VSG} "https://github.com/vsg-dev/osg2vsg.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_ARGS1}" "${EXTRA_ARGS2}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}")
     if (TARGET_OSG OR TARGET_VSG)
         ExternalProject_Add_StepDependencies(${TARGET_OSG2VSG} configure ${TARGET_OSG} ${TARGET_VSG})
     endif()
@@ -146,7 +183,7 @@ if (NOT VSGXCHANGE_FOUND)
         set(EXTRA_ARGS2 "-DOSG2VSG_DIR=${DOSG2VSG_DIR}")
     endif()
 
-    addExternal(${TARGET_VSGXCHANGE} "https://github.com/vsg-dev/vsgXchange.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_ARGS1}" "${EXTRA_ARGS2}")
+    addExternal(${TARGET_VSGXCHANGE} "https://github.com/vsg-dev/vsgXchange.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_ARGS1}" "${EXTRA_ARGS2}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}")
     if (TARGET_VSG OR TARGET_OSG2VSG)
         ExternalProject_Add_StepDependencies(${TARGET_VSGXCHANGE} configure ${TARGET_VSG} ${TARGET_OSG2VSG})
     endif()
@@ -159,10 +196,5 @@ if (NOT VSGXCHANGE_FOUND)
     endif()
     message("In VSGXCHANGE Fallback setup")
 endif()
-
-add_custom_target(clobber
-    COMMAND git clean -d -f -x
-    COMMAND rm -rf components
-)
 
 add_subdirectory(applications)
