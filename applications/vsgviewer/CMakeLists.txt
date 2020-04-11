@@ -11,6 +11,10 @@ if (TARGET_VSG)
     add_dependencies(${APPLICATION_NAME} ${TARGET_VSG})
 endif()
 
+if (TARGET_OSG2VSG)
+    add_dependencies(${APPLICATION_NAME} ${TARGET_OSG2VSG})
+endif()
+
 if (TARGET_VSGXCHANGE)
     add_dependencies(${APPLICATION_NAME} ${TARGET_VSGXCHANGE})
 endif()

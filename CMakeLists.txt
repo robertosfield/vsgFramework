@@ -114,6 +114,13 @@ find_package(osg)
 find_package(osgDB)
 find_package(osgUtil)
 if (NOT OSG_FOUND)
+
+    message("In OSG Fallback setup")
+
+    if (NOT EXISTS include)
+        file(MAKE_DIRECTORY include)
+    endif()
+
     set(TARGET_OSG OpenSceneGraph)
 
     if (WIN32)
@@ -128,30 +135,56 @@ if (NOT OSG_FOUND)
     set(OSGDB_LIBRARIES ${OUTPUT_LIBDIR}/libosgDB${OSG_LIB_SUFFIX} CACHE FILEPATH "osgUtl Library" FORCE)
     set(OSGUTIL_LIBRARIES ${OUTPUT_LIBDIR}/libosgUtil${OSG_LIB_SUFFIX} CACHE FILEPATH "osgDB Library" FORCE)
     set(OSG_FOUND TRUE CACHE BOOL "OSG Library" FORCE)
-    message("In OSG Fallback setup")
 endif()
 
-find_package(vsg)
+find_package(vsg QUIET)
 if (NOT vsg_FOUND)
+
+    message("In VSG Fallback setup")
+
+    if (NOT EXISTS include)
+        file(MAKE_DIRECTORY include)
+    endif()
+
     set(TARGET_VSG VulkanSceneGraph)
     addExternal(${TARGET_VSG} "https://github.com/vsg-dev/VulkanSceneGraph.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}" "" "")
-    set(VSG_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsg header directory" FORCE)
-    set(VSG_LIBRARY ${OUTPUT_LIBDIR}/libvsg${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "vsg Library" FORCE)
-    set(VSG_LIBRARIES ${VSG_LIBRARY})
-    set(VSG_FOUND TRUE CACHE BOOL "vsg Library" FORCE)
+    set(vsg_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsg header directory" FORCE)
+    set(vsg_INCLUDE_DIRS ${vsg_INCLUDE_DIR})
+    set(vsg_LIBRARY ${OUTPUT_LIBDIR}/libvsg${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "vsg Library" FORCE)
+    set(vsg_LIBRARIES ${vsg_LIBRARY})
+    set(vsg_FOUND TRUE CACHE BOOL "vsg Library" FORCE)
     if (${BUILD_SHARED_LIBS})
-        set(VSG_DEFINITIONS VSG_SHARED_LIBRARY)
+        set(vsg_DEFINITIONS vsg_SHARED_LIBRARY)
     endif()
-    message("In VSG Fallback setup")
+
+    add_library(vsg::vsg UNKNOWN IMPORTED)
+
+    set(WINDOWING_LIBS xcb)
+
+    # note. need to make xcb entry in INTERFACE_LINK_LIBRARIES platform depedent.
+    set_target_properties(vsg::vsg PROPERTIES
+        IMPORTED_LOCATION "${vsg_LIBRARIES}"
+        INTERFACE_LINK_LIBRARIES "Vulkan::Vulkan;Threads::Threads;${WINDOWING_LIBS}"
+        INTERFACE_INCLUDE_DIRECTORIES "${vsg_INCLUDE_DIRS}")
+
 endif()
 
 
-find_package(osg2vsg)
+find_package(osg2vsg QUIET)
 if (NOT osg2vsg_FOUND)
+
+    message("In OSG2VSG Fallback setup")
+
+    find_package(glslang)
+
+    if (NOT EXISTS include)
+        file(MAKE_DIRECTORY include)
+    endif()
+
     set(TARGET_OSG2VSG osg2vsg)
 
-    if (VSG_DIR)
-        set(EXTRA_ARGS1 "-DVSG_DIR=${VSG_DIR}")
+    if (vsg_DIR)
+        set(EXTRA_ARGS1 "-Dvsg_DIR=${vsg_DIR}")
     endif()
     if (OSG_DIR)
         set(EXTRA_ARGS2 "-DOSG_DIR=${OSG_DIR}")
@@ -161,40 +194,63 @@ if (NOT osg2vsg_FOUND)
     if (TARGET_OSG OR TARGET_VSG)
         ExternalProject_Add_StepDependencies(${TARGET_OSG2VSG} configure ${TARGET_OSG} ${TARGET_VSG})
     endif()
-    set(OSG2VSG_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "osg2vsg header directory" FORCE)
-    set(OSG2VSG_LIBRARY ${OUTPUT_LIBDIR}/libosg2vsg${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "osg2vsg Library" FORCE)
-    set(OSG2VSG_LIBRARIES ${OSG2VSG_LIBRARY})
-    set(OSG2VSG_FOUND TRUE CACHE BOOL "osg2vsg Library" FORCE)
+    set(osg2vsg_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "osg2vsg header directory" FORCE)
+    set(osg2vsg_LIBRARY ${OUTPUT_LIBDIR}/libosg2vsg${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "osg2vsg Library" FORCE)
+    set(osg2vsg_LIBRARIES ${osg2vsg_LIBRARY})
+    set(osg2vsg_FOUND TRUE CACHE BOOL "osg2vsg Library" FORCE)
     if (${BUILD_SHARED_LIBS})
-        set(OSG2VSG_DEFINITIONS OSG2VSG_SHARED_LIBRARY)
+        set(osg2vsg_DEFINITIONS osg2vsg_SHARED_LIBRARY)
     endif()
-    message("In OSG2VSG Fallback setup")
+
+    add_library(osg2vsg::osg2vsg UNKNOWN IMPORTED)
+    set_target_properties(osg2vsg::osg2vsg PROPERTIES
+        IMPORTED_LOCATION "${osg2vsg_LIBRARIES}"
+        INTERFACE_LINK_LIBRARIES "vsg::vsg;${OSG_LIBRARIES};${OSGUTIL_LIBRARIES};${OSGDB_LIBRARIES};${GLSLANG}"
+        INTERFACE_INCLUDE_DIRECTORIES "${osg2vsg_INCLUDE_DIRS}")
+
 endif()
 
 
-find_package(vsgXchange)
+find_package(vsgXchange QUIET)
 if (NOT vsgXchange_FOUND)
+
+    find_package(glslang)
+
+    message("In VSGXCHANGE Fallback setup")
+
+    if (NOT EXISTS include)
+        file(MAKE_DIRECTORY include)
+    endif()
+
     set(TARGET_VSGXCHANGE vsgXchange)
 
-    if (VSG_DIR)
-        set(EXTRA_ARGS1 "-DVSG_DIR=${VSG_DIR}")
+    if (vsg_DIR)
+        set(EXTRA_ARGS1 "-Dvsg_DIR=${vsg_DIR}")
     endif()
-    if (OSG2VSG_DIR)
-        set(EXTRA_ARGS2 "-DOSG2VSG_DIR=${DOSG2VSG_DIR}")
+    if (osg2vsg_DIR)
+        set(EXTRA_ARGS2 "-Dosg2vsg_DIR=${Dosg2vsg_DIR}")
     endif()
 
     addExternal(${TARGET_VSGXCHANGE} "https://github.com/vsg-dev/vsgXchange.git" "master" "-DBUILD_SHARED_LIBS=${BUILD_SHARED_LIBS}" "${EXTRA_ARGS1}" "${EXTRA_ARGS2}" "${EXTRA_CMAKE_ARGS_VULKAN_SDK}")
     if (TARGET_VSG OR TARGET_OSG2VSG)
         ExternalProject_Add_StepDependencies(${TARGET_VSGXCHANGE} configure ${TARGET_VSG} ${TARGET_OSG2VSG})
     endif()
-    set(VSGXCHANGE_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsgXchange header directory" FORCE)
-    set(VSGXCHANGE_LIBRARY ${OUTPUT_LIBDIR}/libvsgXchange${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "vsgXchange Library" FORCE)
-    set(VSGXCHANGE_LIBRARIES ${VSGXCHANGE_LIBRARY})
-    set(VSGXCHANGE_FOUND TRUE CACHE BOOL "vsgXchange Library" FORCE)
+    set(vsgXchange_INCLUDE_DIR ${OUTPUT_INCDIR} CACHE PATH "vsgXchange header directory" FORCE)
+    set(vsgXchange_LIBRARY ${OUTPUT_LIBDIR}/libvsgXchange${DEFAULT_LIB_SUFFIX} CACHE FILEPATH "vsgXchange Library" FORCE)
+    set(vsgXchange_LIBRARIES ${vsgXchange_LIBRARY})
+    set(vsgXchange_FOUND TRUE CACHE BOOL "vsgXchange Library" FORCE)
     if (${BUILD_SHARED_LIBS})
-        set(VSGXCHANGE_DEFINITIONS VSGXCHANGE_SHARED_LIBRARY)
+        set(vsgXchange_DEFINITIONS vsgXchange_SHARED_LIBRARY)
     endif()
-    message("In VSGXCHANGE Fallback setup")
+
+    add_library(vsgXchange::vsgXchange UNKNOWN IMPORTED)
+    set_target_properties(vsgXchange::vsgXchange PROPERTIES
+        IMPORTED_LOCATION "${vsgXchange_LIBRARIES}"
+        INTERFACE_LINK_LIBRARIES "vsg::vsg;osg2vsg::osg2vsg;${GLSLANG}"
+        INTERFACE_INCLUDE_DIRECTORIES "${vsgXchange_INCLUDE_DIRS}")
+
 endif()
 
-add_subdirectory(applications)
+if (vsg_FOUND)
+    add_subdirectory(applications)
+endif()
